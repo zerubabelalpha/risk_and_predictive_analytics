@@ -5,9 +5,9 @@ simple discription about the proj
 ## Table of content
 
 
--[Installation] (#installation)
--[Usage] (#usage)
--[Contributing](#contributing)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Contributing](#contributing)
 
 ## Installation
 
