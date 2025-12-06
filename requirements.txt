@@ -3,3 +3,4 @@ matplotlib
 seaborn
 pandas
 pytest
+dvc
