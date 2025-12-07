@@ -53,7 +53,7 @@ risk_and_predictive_analytics/
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/zerubabelalpha/risk_and_predictive_analytics
    cd risk_and_predictive_analytics
    ```
 
