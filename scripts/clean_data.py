@@ -209,38 +209,182 @@ class DataCleaner:
         
         return df
     
+    def convert_booleans(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Convert boolean-like columns to binary 0/1.
+        """
+        df = df.copy()
+        bool_cols = [
+            'IsVATRegistered', 'AlarmImmobiliser', 'TrackingDevice',
+            'NewVehicle', 'WrittenOff', 'Rebuilt', 'Converted', 'CrossBorder'
+        ]
+        
+        mapping = {'Yes': 1, 'No': 0, True: 1, False: 0, 'True': 1, 'False': 0}
+        
+        for col in bool_cols:
+            if col in df.columns:
+                df[col] = df[col].map(mapping).fillna(0) # Assume 0 if missing/unknown after map
+                
+        print(f"✓ Converted boolean columns to binary")
+        return df
+
+    def engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create derived features like VehicleAge.
+        """
+        df = df.copy()
+        
+        # Vehicle Age
+        # Ensure we have numeric years. RegistrationYear should be numeric from convert_to_numeric
+        # TransactionMonth (string) -> extract year
+        if 'TransactionMonth' in df.columns and 'RegistrationYear' in df.columns:
+            # Create temp TransactionYear
+            try:
+                # Handle YYYY-MM-DD format from normalize_dates
+                df['TransactionYear'] = pd.to_datetime(df['TransactionMonth'], errors='coerce').dt.year
+                df['VehicleAge'] = df['TransactionYear'] - df['RegistrationYear']
+                # Drop temp column if not needed or keep it
+                # df = df.drop('TransactionYear', axis=1)
+                print(f"✓ Created VehicleAge feature")
+            except Exception as e:
+                print(f"⚠ Could not create VehicleAge: {e}")
+                
+        return df
+
+    def impute_gender_from_title(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create/Impute 'Gender' column from 'Title' column.
+        """
+        df = df.copy()
+        if 'Title' in df.columns:
+            # Map titles to gender
+            title_map = {
+                'Mr': 'Male',
+                'Mrs': 'Female',
+                'Ms': 'Female',
+                'Miss': 'Female',
+                'Dr': 'Unknown',
+            }
+            
+            def get_gender(title):
+                if pd.isna(title):
+                    return pd.NA
+                t = str(title).strip().replace('.', '')
+                if t in title_map:
+                    return title_map[t]
+                # Fallback for common prefixes
+                if t.startswith('Mr'): return 'Male'
+                if t.startswith('Mrs') or t.startswith('Ms') or t.startswith('Miss'): return 'Female'
+                return pd.NA
+            
+            # If Gender column doesn't exist, create it
+            if 'Gender' not in df.columns:
+                df['Gender'] = pd.NA
+            else:
+                # Treat empty strings and whitespace as NA
+                df['Gender'] = df['Gender'].replace(r'^\s*$', pd.NA, regex=True)
+            
+            # Fill missing Gender values
+            # We use a temporary series to map
+            inferred = df['Title'].apply(get_gender)
+            df['Gender'] = df['Gender'].fillna(inferred)
+            
+            print(f"✓ Imputed Gender from Title")
+            
+        return df
+
+    def handle_missing_values(self, df: pd.DataFrame, drop_threshold_pct: float = 0.2) -> pd.DataFrame:
+        """
+        Handle missing values:
+        1. Replace strings like '', 'Not specified' with NaN
+        2. Drop columns with > (1-drop_threshold_pct) missing values (e.g. >80% missing)
+        3. Fill categorical with 'Unknown'
+        4. Fill numeric with median
+        """
+        df = df.copy()
+        
+        # 1. Standardize missing
+        df.replace(['', 'Not specified', 'nan', 'None'], pd.NA, inplace=True)
+        
+        # 2. Drop sparse columns
+        # thresh = require at least N non-NA values
+        thresh = len(df) * drop_threshold_pct
+        start_cols = len(df.columns)
+        df = df.dropna(axis=1, thresh=thresh)
+        dropped_count = start_cols - len(df.columns)
+        if dropped_count > 0:
+            print(f"✓ Dropped {dropped_count} columns with >{100*(1-drop_threshold_pct)}% missing values")
+
+        # 3. Fill Categorical
+        cat_cols = df.select_dtypes(include=['object', 'string']).columns
+        for col in cat_cols:
+            df[col] = df[col].fillna('Unknown')
+            
+        # 4. Fill Numeric
+        num_cols = df.select_dtypes(include=['number']).columns
+        for col in num_cols:
+            median_val = df[col].median()
+            df[col] = df[col].fillna(median_val)
+            
+        print(f"✓ Imputed missing values (Cat: Unknown, Num: Median)")
+        return df
+
+    def remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove duplicate rows."""
+        orig_len = len(df)
+        df = df.drop_duplicates(keep='first')
+        dropped = orig_len - len(df)
+        if dropped > 0:
+            print(f"✓ Removed {dropped:,} duplicate rows")
+        return df
+
     def clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply all cleaning transformations to the DataFrame.
         
-        This method:
-        1. Trims whitespace from string columns
-        2. Converts numeric columns to proper types
-        3. Normalizes date columns to yyyy-mm-dd format
-        4. Calculates loss ratio
-        5. Cleans categorical columns
-        
-        Args:
-            df: Input DataFrame
-        
-        Returns:
-            Cleaned DataFrame
+        Pipeline:
+        1. Trim whitespace
+        2. Replace missing-like strings
+        3. Convert numeric
+        4. Normalize dates
+        5. Convert booleans
+        6. Feature engineering (VehicleAge)
+        7. Handle missing values (Drop sparse, Impute)
+        8. Remove duplicates
+        9. Calculate loss ratio
         """
         print("\n=== Starting Data Cleaning ===")
         
-        # Trim whitespace (already done in load_data, but ensure it's done)
+        # 1. Trim
         df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
         
-        # Convert numeric columns
+       #2.
+        
+        # 3. Numeric
         df = self.convert_to_numeric(df)
         
-        # Normalize dates
+        # 4. Dates
         df = self.normalize_dates(df)
         
-        # Calculate loss ratio
+        # 5. Booleans
+        df = self.convert_booleans(df)
+        
+        # 6. Features
+        df = self.engineer_features(df)
+        
+        # 6b. Impute Gender from Title (before handling missing values)
+        df = self.impute_gender_from_title(df)
+        
+        # 7. Missing Values
+        df = self.handle_missing_values(df)
+        
+        # 8. Duplicates
+        df = self.remove_duplicates(df)
+        
+        # 9. Loss Ratio
         df = self.calculate_loss_ratio(df)
         
-        # Clean categorical columns
+        # Extra cleaning
         if "Province" in df.columns:
             df["Province"] = df["Province"].str.title().replace({"Gauteng ": "Gauteng"})
         
