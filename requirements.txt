@@ -4,3 +4,5 @@ seaborn
 pandas
 pytest
 dvc
+xgboost
+scikit-learn 
